@@ -1,64 +1,121 @@
---Comment
-CREATE TABLE public.customer
-(
-    "customer_id" character varying PRIMARY KEY NOT NULL,
-    "customer_name" character varying COLLATE pg_catalog."default",
-    "segment" character varying COLLATE pg_catalog."default",
-    "age" integer,
-    "country" character varying COLLATE pg_catalog."default",
-    "city" character varying COLLATE pg_catalog."default",
-    "state" character varying COLLATE pg_catalog."default",
-    "postal_code" integer,
-    "region" character varying COLLATE pg_catalog."default"
-)
-WITH (
-    OIDS = FALSE
-)
-TABLESPACE pg_default;
-
-ALTER TABLE public.customer
-    OWNER to postgres;
-
-copy customer from 'C:\Program Files\PostgreSQL\10\data\Data_Copy\Customer.csv' delimiter ',' csv header;
-
-CREATE TABLE public.product
-(
-    "product_id" character varying PRIMARY KEY,
-    "category" character varying COLLATE pg_catalog."default",
-    "sub_category" character varying COLLATE pg_catalog."default",
-    "product Name" character varying COLLATE pg_catalog."default"
-	)
-WITH (
-    OIDS = FALSE
-)
-TABLESPACE pg_default;
-
-ALTER TABLE public.product
-    OWNER to postgres;
-	
-copy product from 'C:\Program Files\PostgreSQL\10\data\Data_Copy\Product.csv' delimiter ',' csv header;
-
-CREATE TABLE public.sales
-(
-    "order_line" integer PRIMARY KEY ,
-    "order_id" character varying COLLATE pg_catalog."default",
-    "order_date" date,
-    "ship_date" character varying COLLATE pg_catalog."default",
-    "ship_mode" character varying COLLATE pg_catalog."default",
-    "customer_id" character varying COLLATE pg_catalog."default" references customer("customer_id"),
-    "product_id" character varying COLLATE pg_catalog."default" references product("product_id"),
-    "sales" double precision,
-    "quantity" integer,
-    "discount" double precision,
-    "profit" double precision
-)
-WITH (
-    OIDS = FALSE
-)
-TABLESPACE pg_default;
-
-ALTER TABLE public.sales
-    OWNER to postgres;
-
- 	
-copy sales from 'C:\Program Files\PostgreSQL\10\data\Data_Copy\Sales.csv' delimiter ',' csv header;
+--Inspect data, it is better to do it separately
+select 
+  distinct status, 
+  year_id, 
+  product_line, 
+  country, 
+  deal_size, 
+  territory, 
+  month_id 
+from 
+  sales ---ANALYSIS
+  ----What was the best month for sales in a specific year? How much was earned that month?
+select 
+  month_id, 
+  count(order_number) frequency, 
+  sum(sales) revenue 
+from 
+  sales 
+where 
+  year_id = 2003 --> inspect for year 2003 first
+group by 
+  month_id 
+order by 
+  3 desc --> November 
+select 
+  month_id, 
+  count(order_number) frequency, 
+  sum(sales) revenue 
+from 
+  sales 
+where 
+  year_id = 2004 
+group by 
+  month_id 
+order by 
+  3 desc --> November
+  ----Who is our best customer (this could be best answered with RFM)
+  with rfm as (
+    select 
+      customername, 
+      sum(sales) MonetaryValue, 
+      round(
+        avg(sales), 
+        2
+      ) AVGMonetaryValue, 
+      count(order_number) frequency, 
+      max(order_date) latest_order_date, 
+      (
+        select 
+          max(order_date) 
+        from 
+          sales
+      ) max_order_date, 
+      DATE_PART(
+        'day', 
+        (
+          select 
+            max(order_date) 
+          from 
+            sales
+        ):: timestamp - max(order_date):: timestamp
+      ) recency 
+    from 
+      sales 
+    group by 
+      customername
+  ), 
+  rfm_calc as (
+    select 
+      *, 
+      ntile(4) over (
+        order by 
+          recency desc
+      ) rfm_recency, 
+      ntile(4) over (
+        order by 
+          frequency
+      ) rfm_frequency, 
+      ntile(4) over (
+        order by 
+          AVGMonetaryValue
+      ) rfm_monetary 
+    from 
+      rfm
+  ) 
+select 
+  c.*, 
+  rfm_recency + rfm_frequency + rfm_monetary as rfm_cell
+  into rfm1
+from rfm_calc c;
+ 
+---Categorize customer
+select 
+  customername, 
+  rfm_recency, 
+  rfm_frequency, 
+  rfm_monetary, 
+  case when rfm_cell > 9 then 'high value' when rfm_cell > 6 
+  and rfm_cell <= 9 then 'loyal' when rfm_cell > 3 
+  and rfm_cell <= 6 then 'high potential' else 'low' end as rfm_segment 
+from 
+  rfm1 ---what product most often sales together 
+select 
+  order_number, 
+  string_agg(product_code, ',') 
+from 
+  sales 
+where 
+  order_number in (
+    select 
+      order_number co 
+    from 
+      sales 
+    where 
+      status = 'Shipped' 
+    group by 
+      order_number 
+    having 
+      count(*) = 3 )-- change number to see the rest
+    group by 
+      order_number
