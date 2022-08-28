@@ -1,4 +1,4 @@
-
+--Comment
 CREATE TABLE public.customer
 (
     "customer_id" character varying PRIMARY KEY NOT NULL,
